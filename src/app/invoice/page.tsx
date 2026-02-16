@@ -50,28 +50,52 @@ export default function InvoicePage() {
     document.title = data.number ? `Factura ${data.number}` : "Nueva Factura";
   }, [data.number]);
 
-  // -- PDF Export logic using html2canvas & jspdf --
+  // -- PDF Export logic using Hidden Clone Strategy --
   const handleExportPDF = async () => {
     setIsExporting(true);
     try {
       if (!canvasRef.current) throw new Error("Canvas ref is null");
 
-      const element = canvasRef.current;
+      const originalElement = canvasRef.current;
 
-      // Temporarily remove transform/scaling if any
-      const originalTransform = element.style.transform;
-      element.style.transform = "none";
+      // 1. Create a temporary container for the clone
+      const container = document.createElement("div");
+      container.style.position = "fixed";
+      container.style.top = "-10000px";
+      container.style.left = "-10000px";
+      // Force A4 dimensions
+      container.style.width = "210mm";
+      container.style.minHeight = "297mm";
+      container.style.backgroundColor = "#ffffff";
+      container.style.zIndex = "-100";
+      document.body.appendChild(container);
 
-      const canvas = await html2canvas(element, {
-        scale: 4,
+      // 2. Clone the invoice element
+      const clonedElement = originalElement.cloneNode(true) as HTMLElement;
+
+      // 3. Clean up the clone
+      // Ensure the clone has the correct width/height constraints explicitly
+      clonedElement.style.width = "210mm";
+      clonedElement.style.minHeight = "297mm";
+      clonedElement.style.transform = "none"; // Remove any scaling
+      clonedElement.style.margin = "0";
+      clonedElement.style.boxShadow = "none";
+
+      // Append clone to temporary container
+      container.appendChild(clonedElement);
+
+      // 4. Capture the CLONE, not the original
+      const canvas = await html2canvas(clonedElement, {
+        scale: 4, // High quality
         useCORS: true,
-        letterRendering: true,
         allowTaint: true,
         backgroundColor: "#ffffff",
         imageTimeout: 15000,
         logging: true,
+        // Ensure html2canvas sees the full width
+        windowWidth: 210 * 3.7795275591,
         onclone: (clonedDoc: Document) => {
-          // Fallback for html2canvas unsupported color functions (tailwind v4 uses oklab/lab/oklch)
+          // Fallback for html2canvas unsupported color functions
           const allElements = clonedDoc.querySelectorAll("*");
           allElements.forEach((el: Element) => {
             const style = window.getComputedStyle(el);
@@ -88,14 +112,14 @@ export default function InvoicePage() {
               (el as HTMLElement).style.color = "#000000";
             }
             if (isUnsupported(style.borderColor)) {
-              (el as HTMLElement).style.borderColor = "#cbd5e1"; // slate-300
+              (el as HTMLElement).style.borderColor = "#cbd5e1";
             }
           });
         },
       } as any);
 
-      // Restore transform
-      element.style.transform = originalTransform;
+      // 5. Clean up DOM
+      document.body.removeChild(container);
 
       const imgData = canvas.toDataURL("image/png");
 
@@ -107,8 +131,6 @@ export default function InvoicePage() {
       });
 
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      // const pdfHeight = pdf.internal.pageSize.getHeight();
-
       const imgProps = pdf.getImageProperties(imgData);
       const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
 
@@ -120,7 +142,7 @@ export default function InvoicePage() {
         : "Factura-RuedaRola.pdf";
       pdf.save(fileName);
 
-      toast.success("PDF generado exitosamente");
+      toast.success("PDF generado exitosamente (Layout Fixed)");
     } catch (error) {
       console.error("Error generating PDF:", error);
       toast.error("Error al generar PDF");
